@@ -31,6 +31,14 @@ void print_puzzle(const char *puzzle) {
     printf("\n");
 }
 
+void copy_rcsid(char *destination, const char *rcsid) {
+    int i;
+    for (i = 0; i < USERID_BYTES; i++)
+        destination[i] = ' ';
+    for (i = 0; i < USERID_BYTES && rcsid[i] != '\0'; i++)
+        destination[i] = rcsid[i];
+}
+
 // main function for the client 
 int main(int argc, char **argv) {
     int sd;
@@ -68,8 +76,10 @@ int main(int argc, char **argv) {
     if (strcmp(argv[4], "START") == 0) {
         if (argc == 5) {
             memcpy(request, "START", 5);
-            memcpy(request + 5, argv[3], USERID_BYTES);
-            request_length = 16;
+            copy_rcsid(request + 5, argv[3]);
+            request_length = 18;
+            request[16] = ' ';
+            request[17] = ' '; 
         }
         // START w/ puzzle ID 
         else if (argc == 6) {
@@ -81,7 +91,7 @@ int main(int argc, char **argv) {
                 return EXIT_FAILURE;
             }
             memcpy(request, "START", 5);
-            memcpy(request + 5, argv[3], USERID_BYTES);
+            copy_rcsid(request + 5, argv[3]);
             
             if (puzzle_id < 10) {
                 request[16] = ' ';
@@ -131,7 +141,7 @@ int main(int argc, char **argv) {
         }
         // build PLACE function
         memcpy(request, "PLACE", 5);
-        memcpy(request + 5, argv[3], USERID_BYTES);
+        copy_rcsid(request + 5, argv[3]);
         request[16] = argv[5][0];
         request[17] = argv[6][0];
         request[18] = digit;

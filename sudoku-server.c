@@ -107,7 +107,9 @@ void loop_n_listen(int sd) {
                       (socklen_t *)&addrlen );
 
     if ( n == -1 ) { perror( "recvfrom() failed" ); continue; }
-
+    printf( "SERVER: received %d bytes from %s port %d\n",
+            n, inet_ntoa( remote_client.sin_addr ),
+            ntohs( remote_client.sin_port ) );
     handle_request(sd, remote_client, addrlen, n, buffer);
   }
 }
