@@ -94,11 +94,6 @@ int duplicate_in_block(const char *puzzle, int target_row, int target_col, char 
 }
 
 void loop_n_listen(int sd) {
-    char request[128];
-    char response[128];
-    ssize_t request_length;
-    ssize_t response_length;
-
     while ( 1 )
     {
     char buffer[MAXBUFFER+1];
@@ -113,6 +108,22 @@ void loop_n_listen(int sd) {
 
     if ( n == -1 ) { perror( "recvfrom() failed" ); continue; }
 
+    handle_request(sd, remote_client, addrlen, n, buffer);
+  }
+}
+
+void handle_request(int sd, struct sockaddr_in remote_client, int addrlen, int n, char buffer[MAXBUFFER+1]) {
+    if (n == 18) {
+        // start
+        printf("rcvd start request prolly");
+    } else if (n == 19) {
+        // place
+        printf("rcvd start request prolly");
+    } else {
+        // bad request
+        printf("rcvd bad request prolly");
+    }
+
     printf( "Rcvd datagram from %s port %d\n",
             inet_ntoa( remote_client.sin_addr ),
             ntohs( remote_client.sin_port ) );
@@ -124,7 +135,8 @@ void loop_n_listen(int sd) {
     /* echo the first 3 bytes (at most) plus '\n' back to the client */
     if ( n > 3 ) { n = 4; buffer[3] = '\n'; }
     sendto( sd, buffer, n, 0, (struct sockaddr *)&remote_client, addrlen );
-  }
+
+    /* TO DO: check the return value from sendto() */
 }
 
 void start() {} // handle start request
