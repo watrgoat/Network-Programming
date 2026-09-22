@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    recv_buffer = malloc(RECV_BUFFER_SIZE);
+    recv_buffer = calloc(RECV_BUFFER_SIZE, sizeof(char));
     if (recv_buffer == NULL) {
         perror("malloc");
         free(packet);
