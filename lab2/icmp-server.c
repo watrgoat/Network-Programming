@@ -378,12 +378,16 @@ int main(int argc, char **argv)
 
             fflush(rcvd_file);
 
+            struct in_addr response_source;
+
+            response_source.s_addr = ip_header->saddr;
+
             printf("Rcvd ICMP response (%d bytes) from %s; "
-                   "seq no %u; data \"%.4s\"\n",
-                   icmp_length,
-                   inet_ntoa(sender.sin_addr),
-                   ntohs(icmp_header->un.echo.sequence),
-                   (char *)data);
+                "seq no %u; data \"%.4s\"\n",
+                icmp_length,
+                inet_ntoa(response_source),
+                ntohs(icmp_header->un.echo.sequence),
+                (char *)data);
 
             received_reply = 1;
             responses++;
