@@ -42,28 +42,19 @@ int resolve_host(const char *host, struct sockaddr_in *dest)
     struct addrinfo *result = NULL;
 
     memset(dest, 0, sizeof(*dest));
+    dest->sin_family = AF_INET;
 
     if (inet_pton(AF_INET, host, &dest->sin_addr) == 1)
-    {
-        dest->sin_family = AF_INET;
-        dest->sin_port = htons(IPPROTO_ICMP);
         return 0;
-    }
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_RAW;
-    hints.ai_protocol = IPPROTO_ICMP;
 
     if (getaddrinfo(host, NULL, &hints, &result) != 0)
         return -1;
 
-    memcpy(&dest->sin_addr,
-           &((struct sockaddr_in *)result->ai_addr)->sin_addr,
-           sizeof(dest->sin_addr));
-
-    dest->sin_family = AF_INET;
-    dest->sin_port = htons(IPPROTO_ICMP);
+    dest->sin_addr =
+        ((struct sockaddr_in *)result->ai_addr)->sin_addr;
 
     freeaddrinfo(result);
 
@@ -71,15 +62,17 @@ int resolve_host(const char *host, struct sockaddr_in *dest)
 }
 
 void construct_icmp_packet(unsigned char *packet,
-                           size_t packet_size,
                            unsigned short identifier,
                            unsigned short sequence,
                            const char *first_four_bytes)
 {
     struct icmphdr *icmp;
     unsigned char *data;
+    int icmp_size;
 
-    memset(packet, 0, packet_size);
+    icmp_size = sizeof(struct icmphdr) + DATA_SIZE;
+
+    memset(packet, 0, icmp_size);
 
     icmp = (struct icmphdr *)packet;
 
@@ -91,11 +84,54 @@ void construct_icmp_packet(unsigned char *packet,
 
     data = packet + sizeof(struct icmphdr);
 
-    memset(data, 0, DATA_SIZE);
     memcpy(data, first_four_bytes, 4);
 
     icmp->checksum =
-        calculate_internet_checksum(packet, (int)packet_size);
+        calculate_internet_checksum(packet, icmp_size);
+}
+
+void construct_ip_packet(unsigned char *packet,
+                         size_t packet_size,
+                         struct in_addr source,
+                         struct in_addr destination,
+                         unsigned short identifier,
+                         unsigned short sequence,
+                         const char *first_four_bytes)
+{
+    struct iphdr *ip_header;
+    unsigned char *icmp_packet;
+    int icmp_size;
+
+    memset(packet, 0, packet_size);
+
+    ip_header = (struct iphdr *)packet;
+
+    ip_header->version = 4;
+    ip_header->ihl = 5;
+    ip_header->tos = 0;
+    ip_header->tot_len = htons((unsigned short)packet_size);
+    ip_header->id = htons(identifier);
+    ip_header->frag_off = htons(0);
+    ip_header->ttl = 64;
+    ip_header->protocol = IPPROTO_ICMP;
+    ip_header->check = 0;
+    ip_header->saddr = source.s_addr;
+    ip_header->daddr = destination.s_addr;
+
+    ip_header->check =
+        calculate_internet_checksum(ip_header,
+                                    sizeof(struct iphdr));
+
+    icmp_size = sizeof(struct icmphdr) + DATA_SIZE;
+
+    icmp_packet = packet + sizeof(struct iphdr);
+
+    construct_icmp_packet(icmp_packet,
+                          identifier,
+                          sequence,
+                          first_four_bytes);
+
+    (void)icmp_size;
 }
 
 int main(int argc, char **argv)
@@ -104,18 +140,23 @@ int main(int argc, char **argv)
 
     int sd;
     int interval = DEFAULT_INTERVAL;
-    int valid_responses = 0;
+    int responses = 0;
+    int one = 1;
+
     unsigned short identifier;
     unsigned short sequence = 0;
 
     struct sockaddr_in dest;
+    struct in_addr source;
 
     size_t packet_size;
+
     unsigned char *packet;
     unsigned char *recv_buffer;
+
     FILE *rcvd_file;
 
-    if (argc < 3 || argc > 4)
+    if (argc != 3 && argc != 4)
     {
         fprintf(stderr, "Usage: %s host data [interval]\n", argv[0]);
         return EXIT_FAILURE;
@@ -123,16 +164,18 @@ int main(int argc, char **argv)
 
     if (strlen(argv[2]) != 4)
     {
-        fprintf(stderr, "Data argument must contain exactly four bytes\n");
+        fprintf(stderr, "Data must be exactly four bytes\n");
         return EXIT_FAILURE;
     }
 
     if (argc == 4)
     {
-        char *endptr;
-        long value = strtol(argv[3], &endptr, 10);
+        char *end;
+        long value;
 
-        if (*endptr != '\0' || value <= 0)
+        value = strtol(argv[3], &end, 10);
+
+        if (*end != '\0' || value <= 0)
         {
             fprintf(stderr, "Invalid interval\n");
             return EXIT_FAILURE;
@@ -147,15 +190,18 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    if (inet_pton(AF_INET, "128.113.28.122", &source) != 1)
+        return EXIT_FAILURE;
+
     printf("ICMPv4 ping (interval %d second%s); host %s",
            interval,
            interval == 1 ? "" : "s",
            argv[1]);
 
     {
-        struct in_addr numeric_addr;
+        struct in_addr numeric;
 
-        if (inet_pton(AF_INET, argv[1], &numeric_addr) != 1)
+        if (inet_pton(AF_INET, argv[1], &numeric) != 1)
             printf(" (%s)", inet_ntoa(dest.sin_addr));
     }
 
@@ -169,7 +215,21 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    packet_size = sizeof(struct icmphdr) + DATA_SIZE;
+    if (setsockopt(sd,
+                   IPPROTO_IP,
+                   IP_HDRINCL,
+                   &one,
+                   sizeof(one)) < 0)
+    {
+        perror("setsockopt");
+        close(sd);
+        return EXIT_FAILURE;
+    }
+
+    packet_size =
+        sizeof(struct iphdr) +
+        sizeof(struct icmphdr) +
+        DATA_SIZE;
 
     packet = malloc(packet_size);
 
@@ -194,7 +254,7 @@ int main(int argc, char **argv)
 
     if (rcvd_file == NULL)
     {
-        perror("rcvd.dat");
+        perror("fopen");
         free(recv_buffer);
         free(packet);
         close(sd);
@@ -203,15 +263,17 @@ int main(int argc, char **argv)
 
     identifier = (unsigned short)getpid();
 
-    while (valid_responses < NUM_RESPONSES)
+    while (responses < NUM_RESPONSES)
     {
-        int got_valid_response = 0;
+        int received_reply = 0;
 
-        construct_icmp_packet(packet,
-                              packet_size,
-                              identifier,
-                              sequence,
-                              argv[2]);
+        construct_ip_packet(packet,
+                            packet_size,
+                            source,
+                            dest.sin_addr,
+                            identifier,
+                            sequence,
+                            argv[2]);
 
         if (sendto(sd,
                    packet,
@@ -221,58 +283,65 @@ int main(int argc, char **argv)
                    sizeof(dest)) < 0)
         {
             perror("sendto");
-            break;
+            goto failure;
         }
 
-        while (!got_valid_response)
+        while (!received_reply)
         {
             struct sockaddr_in sender;
-            socklen_t sender_len = sizeof(sender);
-            ssize_t received;
-            struct ip *ip_header;
+            socklen_t sender_len;
+            ssize_t bytes_received;
+
+            struct iphdr *ip_header;
             struct icmphdr *icmp_header;
+
             int ip_header_length;
             int icmp_length;
+
             unsigned char *data;
 
             memset(&sender, 0, sizeof(sender));
+            sender_len = sizeof(sender);
 
-            received = recvfrom(sd,
-                                recv_buffer,
-                                RECV_BUFFER_SIZE,
-                                0,
-                                (struct sockaddr *)&sender,
-                                &sender_len);
+            bytes_received =
+                recvfrom(sd,
+                         recv_buffer,
+                         RECV_BUFFER_SIZE,
+                         0,
+                         (struct sockaddr *)&sender,
+                         &sender_len);
 
-            if (received < 0)
+            if (bytes_received < 0)
             {
                 perror("recvfrom");
-                goto cleanup_failure;
+                goto failure;
             }
 
-            if (received < (ssize_t)sizeof(struct ip))
+            if (bytes_received < (ssize_t)sizeof(struct iphdr))
                 continue;
 
-            ip_header = (struct ip *)recv_buffer;
-            ip_header_length = ip_header->ip_hl * 4;
+            ip_header = (struct iphdr *)recv_buffer;
 
-            if (ip_header_length < (int)sizeof(struct ip))
+            if (ip_header->version != 4)
                 continue;
 
-            if (received < ip_header_length)
+            ip_header_length = ip_header->ihl * 4;
+
+            if (ip_header_length < (int)sizeof(struct iphdr))
                 continue;
 
-            if (ip_header->ip_p != IPPROTO_ICMP)
+            if (bytes_received <
+                ip_header_length + (ssize_t)sizeof(struct icmphdr))
                 continue;
 
-            if (received <
-                (ssize_t)(ip_header_length + sizeof(struct icmphdr)))
+            if (ip_header->protocol != IPPROTO_ICMP)
                 continue;
 
             icmp_header =
                 (struct icmphdr *)(recv_buffer + ip_header_length);
 
-            icmp_length = (int)received - ip_header_length;
+            icmp_length =
+                (int)bytes_received - ip_header_length;
 
             if (icmp_length <
                 (int)(sizeof(struct icmphdr) + DATA_SIZE))
@@ -290,20 +359,21 @@ int main(int argc, char **argv)
             if (ntohs(icmp_header->un.echo.sequence) != sequence)
                 continue;
 
-            data = recv_buffer +
-                   ip_header_length +
-                   sizeof(struct icmphdr);
+            data =
+                recv_buffer +
+                ip_header_length +
+                sizeof(struct icmphdr);
 
             if (memcmp(data, argv[2], 4) != 0)
                 continue;
 
             if (fwrite(recv_buffer,
                        1,
-                       (size_t)received,
-                       rcvd_file) != (size_t)received)
+                       (size_t)bytes_received,
+                       rcvd_file) != (size_t)bytes_received)
             {
                 perror("fwrite");
-                goto cleanup_failure;
+                goto failure;
             }
 
             fflush(rcvd_file);
@@ -315,13 +385,13 @@ int main(int argc, char **argv)
                    ntohs(icmp_header->un.echo.sequence),
                    (char *)data);
 
-            got_valid_response = 1;
-            valid_responses++;
+            received_reply = 1;
+            responses++;
         }
 
         sequence++;
 
-        if (valid_responses < NUM_RESPONSES)
+        if (responses < NUM_RESPONSES)
             sleep((unsigned int)interval);
     }
 
@@ -332,7 +402,7 @@ int main(int argc, char **argv)
 
     return EXIT_SUCCESS;
 
-cleanup_failure:
+failure:
     fclose(rcvd_file);
     free(recv_buffer);
     free(packet);
