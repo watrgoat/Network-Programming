@@ -18,23 +18,22 @@
 
 unsigned short calculate_internet_checksum(void *data, int len)
 {
-    unsigned char *buf = data;
+    unsigned short *buf = data;
     unsigned int sum = 0;
 
     while (len > 1)
     {
-        sum += ((unsigned int)buf[0] << 8) | buf[1];
-        buf += 2;
+        sum += *buf++;
         len -= 2;
     }
 
     if (len == 1)
-        sum += ((unsigned int)buf[0] << 8);
+        sum += *(unsigned char *)buf;
 
     while (sum >> 16)
         sum = (sum & 0xffff) + (sum >> 16);
 
-    return htons((unsigned short)(~sum & 0xffff));
+    return (unsigned short)(~sum);
 }
 
 int resolve_host(const char *host, struct sockaddr_in *dest)
@@ -47,6 +46,7 @@ int resolve_host(const char *host, struct sockaddr_in *dest)
     if (inet_pton(AF_INET, host, &dest->sin_addr) == 1)
     {
         dest->sin_family = AF_INET;
+        dest->sin_port = htons(IPPROTO_ICMP);
         return 0;
     }
 
@@ -63,6 +63,8 @@ int resolve_host(const char *host, struct sockaddr_in *dest)
            sizeof(dest->sin_addr));
 
     dest->sin_family = AF_INET;
+    dest->sin_port = htons(IPPROTO_ICMP);
+
     freeaddrinfo(result);
 
     return 0;
