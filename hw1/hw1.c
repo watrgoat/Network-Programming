@@ -377,22 +377,21 @@ void handle_place(int fd, unsigned char *req)
         reply = 2;
     else if (puzzles[u->puzzle].board[cell(row, col)] != '.')
         reply = 3;
+    else if (digit != '.' && duplicate_row(u, row, col, digit))
+        reply = 4;
+    else if (digit != '.' && duplicate_col(u, row, col, digit))
+        reply = 5;
+    else if (digit != '.' && duplicate_block(u, row, col, digit))
+        reply = 6;
     else {
-        // count digit placements, including sudoku conflicts, but not erases
+        u->board[cell(row, col)] = digit;
+
+        // only successful digit placements count as moves
         if (digit != '.') {
             u->moves++;
             if (u->moves == MAX_MOVES)
                 u->banned = 1;
         }
-
-        if (digit != '.' && duplicate_row(u, row, col, digit))
-            reply = 4;
-        else if (digit != '.' && duplicate_col(u, row, col, digit))
-            reply = 5;
-        else if (digit != '.' && duplicate_block(u, row, col, digit))
-            reply = 6;
-        else
-            u->board[cell(row, col)] = digit;
     }
 
     place_response(fd, reply, u);
@@ -540,7 +539,8 @@ int main(int argc, char **argv)
                 maxfd = fd;
         }
     }
-    printf("SERVER: %d UDP ports ready\n", udp_count);
+    printf("SERVER: %d UDP port%s ready\n", udp_count,
+           udp_count == 1 ? "" : "s");
 
     while (1) {
         readfds = master;
